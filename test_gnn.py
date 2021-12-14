@@ -1,6 +1,10 @@
 import torch
 import time
+import copy
+import argparse
 import torch.nn.functional as F
+
+from tqdm import tqdm
 
 from actnn.controller import Controller # import actnn controller
 from actnn import get_memory_usage, compute_tensor_bytes
@@ -10,8 +14,19 @@ from utils import AverageMeter
 from cogdl.datasets.ogb import OGBArxivDataset
 from cogdl.models.nn.gcn import GCN
 
-actnn = True
-get_mem = True
+parser = argparse.ArgumentParser(description="GNN (ActNN)")
+parser.add_argument("--num-layers", type=int, default=3)
+parser.add_argument("--hidden-size", type=int, default=256)
+parser.add_argument("--dropout", type=float, default=0.5)
+parser.add_argument("--lr", type=float, default=0.01)
+parser.add_argument("--epochs", type=int, default=500)
+parser.add_argument("--actnn", action="store_true")
+parser.add_argument("--get-mem", action="store_true")
+args = parser.parse_args()
+
+
+actnn = args.actnn
+get_mem = args.get_mem
 
 controller = Controller(default_bit=4, swap=False, debug=False, prefetch=False)
 
@@ -23,14 +38,14 @@ graph.apply(lambda x: x.to(device))
 
 model = GCN(
     in_feats=dataset.num_features,
-    hidden_size=512,
+    hidden_size=args.hidden_size,
     out_feats=dataset.num_classes,
-    num_layers=3,
-    dropout=0.0,
-    activation=None,
+    num_layers=args.num_layers,
+    dropout=args.dropout,
+    activation="relu",
 ).to(device)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 controller.filter_tensors(model.named_parameters()) # do not quantize parameters
 
@@ -63,7 +78,10 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook): # install
 
     end = time.time()
 
-    for i in range(10):
+    best_model = None
+    best_acc = 0
+    epoch_iter = tqdm(range(args.epochs))
+    for i in epoch_iter:
         # measure data loading time
         data_time.update(time.time() - end)
         if get_mem and i > 0:
@@ -93,7 +111,11 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook): # install
             logits = model(graph)
             val_loss = F.cross_entropy(logits[graph.val_mask], graph.y[graph.val_mask]).item()
             val_acc = accuracy(logits[graph.val_mask], graph.y[graph.val_mask])
-            print(val_loss, val_acc)
+        
+        epoch_iter.set_description(f"Epoch: {i}" + " val_loss: %.4f" % val_loss + " val_acc: %.4f" % val_acc)
+        if val_acc > best_acc:
+            best_acc = val_acc
+            best_model = copy.deepcopy(model)
 
         if get_mem and i > 0:
             print("===============After Backward=======================")
@@ -118,9 +140,17 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook): # install
 
         controller.iterate()
 
+    model = best_model
+    model.eval()
+    with torch.no_grad():
+        logits = model(graph)
+        test_acc = accuracy(logits[graph.test_mask], graph.y[graph.test_mask])
+        print("Final Test Acc:", test_acc)
+
     print(batch_time.summary())
     print(data_time.summary())
     print(losses.summary())
-    print("Peak %d MB" % (peak_mem.get_value() / 1024 / 1024))
-    print("Total %d MB" % (total_mem.get_value() / 1024 / 1024))
-    print("Activation %d MB" % (activation_mem.get_value() / 1024 / 1024))
+    if get_mem:
+        print("Peak %d MB" % (peak_mem.get_value() / 1024 / 1024))
+        print("Total %d MB" % (total_mem.get_value() / 1024 / 1024))
+        print("Activation %d MB" % (activation_mem.get_value() / 1024 / 1024))
