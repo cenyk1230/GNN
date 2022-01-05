@@ -45,7 +45,7 @@ model = GCN(
     hidden_size=args.hidden_size,
     out_feats=dataset.num_classes,
     num_layers=args.num_layers,
-    # num_layers = 2,
+#    num_layers = 2,
     dropout=args.dropout,
     activation="relu",
 ).to(device)
@@ -161,13 +161,7 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
             loss = F.cross_entropy(
                 output[graph.train_mask], graph.y[graph.train_mask])
             loss.backward()
-            torch.cuda.synchronize()  # Why do we need this?
-            grad = []
-            for param in model.parameters():
-                if param.grad is not None:
-                    grad.append(param.grad.ravel())
-
-            return loss, output, torch.cat(grad, 0)
+            return loss, output
 
         if quantize:
             controller.iterate(get_grad)
