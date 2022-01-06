@@ -160,6 +160,7 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
             output = model(graph)
             loss = F.cross_entropy(
                 output[graph.train_mask], graph.y[graph.train_mask])
+            optimizer.zero_grad()
             loss.backward()
             return loss, output
 
