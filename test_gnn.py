@@ -45,13 +45,13 @@ model = GCN(
     hidden_size=args.hidden_size,
     out_feats=dataset.num_classes,
     num_layers=args.num_layers,
-#    num_layers = 2,
+    #    num_layers = 2,
     dropout=args.dropout,
     activation="relu",
 ).to(device)
 print(model)
 
-actnn.set_optimization_level("L2")
+actnn.set_optimization_level("L2.1")
 controller = Controller(model)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -106,7 +106,6 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         output = model(graph)
         loss = F.cross_entropy(
             output[graph.train_mask], graph.y[graph.train_mask])
-
         # measure accuracy and record loss
         losses.update(loss.detach().item())
 
