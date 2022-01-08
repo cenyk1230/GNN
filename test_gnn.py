@@ -16,7 +16,7 @@ from actnn.utils import get_memory_usage, compute_tensor_bytes
 from utils import AverageMeter
 
 from cogdl.datasets.ogb import OGBArxivDataset
-from cogdl.models.nn.gcn import GCN
+from models import GCN, SAGE
 
 wandb.init(project="ActNN-Graph")
 parser = argparse.ArgumentParser(description="GNN (ActNN)")
@@ -25,6 +25,9 @@ parser.add_argument("--hidden-size", type=int, default=256)
 parser.add_argument("--dropout", type=float, default=0.5)
 parser.add_argument("--lr", type=float, default=0.01)
 parser.add_argument("--epochs", type=int, default=500)
+parser.add_argument("--model", type=str, default="gcn")
+parser.add_argument("--norm", type=str, default=None)
+parser.add_argument("--activation", type=str, default="relu")
 parser.add_argument("--actnn", action="store_true")
 parser.add_argument("--get-mem", action="store_true")
 args = parser.parse_args()
@@ -32,24 +35,38 @@ args = parser.parse_args()
 
 quantize = args.actnn
 get_mem = args.get_mem
-# set_seeds()
 
 device = torch.device("cuda:0")
 
 dataset = OGBArxivDataset()
 graph = dataset[0]
+graph.add_remaining_self_loops()
 graph.apply(lambda x: x.to(device))
 
-model = GCN(
-    in_feats=dataset.num_features,
-    hidden_size=args.hidden_size,
-    out_feats=dataset.num_classes,
-    num_layers=args.num_layers,
-    #    num_layers = 2,
-    dropout=args.dropout,
-    activation="relu",
-).to(device)
+if args.model == "gcn":
+    model = GCN(
+        in_feats=dataset.num_features,
+        hidden_size=args.hidden_size,
+        out_feats=dataset.num_classes,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        activation=args.activation,
+        norm=args.norm,
+    )
+elif args.model == "sage":
+    model = SAGE(
+        in_feats=dataset.num_features,
+        out_feats=dataset.num_classes,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
+        activation=args.activation,
+        norm=args.norm,
+    )
+else:
+    raise NotImplementedError
 print(model)
+model.to(device)
 
 actnn.set_optimization_level("L2.1")
 controller = Controller(model)
@@ -176,6 +193,7 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         logits = model(graph)
         test_acc = accuracy(logits[graph.test_mask], graph.y[graph.test_mask])
         print("Final Test Acc:", test_acc)
+        wandb.log({"test_acc": test_acc})
 
     print(batch_time.summary())
     print(data_time.summary())
