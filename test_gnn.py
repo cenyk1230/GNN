@@ -68,7 +68,7 @@ else:
 print(model)
 model.to(device)
 
-actnn.set_optimization_level("L2.1")
+actnn.set_optimization_level("L2")
 controller = Controller(model)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
