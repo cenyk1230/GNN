@@ -68,7 +68,7 @@ else:
 print(model)
 model.to(device)
 
-actnn.set_optimization_level("L2")
+actnn.set_optimization_level("L2.1")
 controller = Controller(model)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -136,6 +136,10 @@ with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         optimizer.step()
 
         model.eval()
+        for name, child in model.named_modules():
+            if isinstance(child, torch.nn.BatchNorm1d):
+                child.train()
+                
         with torch.no_grad():
             logits = model(graph)
             val_loss = F.cross_entropy(
