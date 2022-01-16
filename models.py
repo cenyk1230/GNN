@@ -1,7 +1,9 @@
+import math
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from cogdl.models import BaseModel
-from cogdl.layers import GCNLayer, SAGELayer, GATLayer
+from cogdl.layers import GCNLayer, SAGELayer, GATLayer, GCNIILayer
 
 
 class GCN(BaseModel):
@@ -139,3 +141,58 @@ class GAT(BaseModel):
             if i != self.num_layers - 1:
                 x = F.dropout(x, p=self.dropout, training=self.training)
         return x
+
+class GCNII(BaseModel):
+
+    def __init__(
+        self,
+        in_feats,
+        hidden_size,
+        out_feats,
+        num_layers,
+        dropout=0.5,
+        alpha=0.1,
+        lmbda=0.5,
+        residual=False,
+    ):
+        super(GCNII, self).__init__()
+        self.fc_layers = nn.ModuleList()
+        self.fc_layers.append(nn.Linear(in_feats, hidden_size))
+        self.fc_layers.append(nn.Linear(hidden_size, out_feats))
+
+        self.dropout = nn.Dropout(dropout)
+        self.activation = nn.ReLU(inplace=True)
+        self.alpha = alpha
+        self.lmbda = lmbda
+
+        self.layers = nn.ModuleList(
+            GCNIILayer(hidden_size, self.alpha, math.log(self.lmbda / (i + 1) + 1), residual) for i in range(num_layers)
+        )
+
+        self.fc_parameters = list(self.fc_layers.parameters())
+        self.conv_parameters = list(self.layers.parameters())
+
+    def forward(self, graph):
+        graph.sym_norm()
+        x = graph.x
+        init_h = self.dropout(x)
+        init_h = self.activation(self.fc_layers[0](init_h))
+
+        h = init_h
+
+        for layer in self.layers:
+            h = self.dropout(h)
+            h = layer(graph, h, init_h)
+            h = self.activation(h)
+        h = self.dropout(h)
+        out = self.fc_layers[1](h)
+        return out
+
+    def get_optimizer(self, args):
+        return torch.optim.Adam(
+            [
+                {"params": self.fc_parameters, "weight_decay": args.wd1},
+                {"params": self.conv_parameters, "weight_decay": args.wd2},
+            ],
+            lr=args.lr,
+        )
